@@ -1,24 +1,23 @@
 package com.gtja.jinterface;
 import java.io.IOException;
+import java.net.Socket;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.Set;
 
 public class JNode extends OtpNode {
-	
-	private Acceptor acceptor;
 
-	public JNode(final String nodeName) throws IOException {
-		super(nodeName);
+	public JNode(String nodeName) throws IOException, OtpErlangException {
+		this(nodeName, defaultCookie);
 	}
 	
-	public JNode(final String nodeName, final String cookie) throws IOException {
-		super(nodeName, cookie, 0);
-	}
-	
-	public OtpMbox addMailbox(String name) {
-		return createMbox(name);
-	}
-	
-	public OtpMbox addMailbox() {
-		return createMbox();
+	public JNode(String nodeName, String cookie) throws IOException, OtpErlangException {
+		super(nodeName, cookie, 0);	
+		if(GlobalNodesView.getAllNodes().isEmpty()){
+			GlobalNodesView.addNode(this);
+		}		
 	}
 	
 	/**
@@ -29,7 +28,7 @@ public class JNode extends OtpNode {
 	 * @param destm	the destination mailbox name.
 	 * @param msg	the message body to send.
 	 */
-	public void sendMsg(String srcm, String destn, String destm, final OtpErlangObject msg){
+	public void sendMessage(String srcm, String destn, String destm, final OtpErlangObject msg){
 		OtpMbox srcmbox = getMailboxes().get(srcm);
 		srcmbox.send(destm, destn, msg);
 	}
@@ -45,7 +44,6 @@ public class JNode extends OtpNode {
 	 */
 	public void sendRPC(String srcm, String destn, 
 			String mod, String fun,OtpErlangObject ...arguments) {
-		
 		OtpErlangObject[] call = new OtpErlangObject[5];
 		OtpErlangObject[] msg = new OtpErlangObject[2];
 		OtpErlangList args = new OtpErlangList(arguments);
@@ -57,7 +55,7 @@ public class JNode extends OtpNode {
 		OtpErlangTuple calltuple = new OtpErlangTuple(call);
 		msg[0] = getMailboxes().get(srcm).self();
 		msg[1] = calltuple;
-		sendMsg(srcm, destn, "rex", new OtpErlangTuple(msg));
+		sendMessage(srcm, destn, "rex", new OtpErlangTuple(msg));
 	}
 	
 	/**
@@ -66,7 +64,7 @@ public class JNode extends OtpNode {
 	 * @param mailbox	the mailbox used to receive.
 	 * @return OtpErlangObject
 	 */
-	public OtpErlangObject receiveMsg(String mailbox) {
+	public OtpErlangObject receiveMessage(String mailbox) {
 		OtpErlangObject msg = null;
 		try {
 			msg = getMailboxes().get(mailbox).receive();
@@ -75,9 +73,47 @@ public class JNode extends OtpNode {
 		} catch (OtpErlangDecodeException e) {
 			e.printStackTrace();
 		} 	
-		return msg;				
+		return msg;		
 	}
 	
+	public Socket createSocketConnection(String peer, int port) throws UnknownHostException, IOException, OtpErlangException {
+		String srcm = "mbox1";
+		createMbox(srcm);
+		String mod = "socket_server";
+		String fun = "start";
+		OtpErlangInt p = new OtpErlangInt(port);
+		sendRPC("mbox1", peer, mod, fun, p);
+		OtpErlangObject rec = receiveMessage(srcm);
+		if(MessageUtil.checkItem(2, 0, "badrpc", rec)){
+			System.out.println("server error");
+			return null;	
+		}else{
+			Socket socket;
+			if(GlobalNodesView.contains(peer)){
+				socket = new Socket(GlobalNodesView.getNode(peer).host(), port);
+			}else{
+				OtpPeer otppeer = new OtpPeer(peer);
+	    	    socket = new Socket(otppeer.host(), port);
+			}
+	    	return socket;
+		}		
+	}
+	
+	public Hashtable<String, OtpCookedConnection> getConnections() {
+		return connections;
+	}
+	
+	public Set<String> getConnectingNodes() {
+		Set<String> nodes = getConnections().keySet();
+		return nodes;
+	}
+
+
+	@Override
+	public void close() {
+		GlobalNodesView.removeNode(this.node());
+		super.close();
+	}
 	
 	
 	
